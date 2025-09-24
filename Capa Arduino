@@ -1,0 +1,93 @@
+// ================== Controlador de Displays por Serial ==================
+#define COMMON_ANODE false      // false = cátodo común, true = ánodo común
+const unsigned COUNTER_MS = 500; // Velocidad del contador (medio segundo)
+
+// Pines en orden a,b,c,d,e,f,g
+int D1[7] = {13, 14, 27, 32, 16, 33, 17}; // Decenas
+int D0[7] = {23, 22, 21, 19, 18, 4, 5};   // Unidades
+
+const uint8_t DIGITS[10][7] = {
+  {1,1,1,1,1,1,0}, {0,1,1,0,0,0,0}, {1,1,0,1,1,0,1}, {1,1,1,1,0,0,1}, {0,1,1,0,0,1,1},
+  {1,0,1,1,0,1,1}, {1,0,1,1,1,1,1}, {1,1,1,0,0,0,0}, {1,1,1,1,1,1,1}, {1,1,1,1,0,1,1}
+};
+
+// Variables de estado
+int currentNumber = 0;       // Número actual a mostrar
+int counterDirection = 0;    // 0 = parado, 1 = ascendente, -1 = descendente
+unsigned long lastUpdateTime = 0; // Para el temporizador del contador
+
+// --- Funciones para controlar el display (tu código original) ---
+inline void segWrite(int pin, bool on) {
+  digitalWrite(pin, (COMMON_ANODE ? !on : on) ? HIGH : LOW);
+}
+
+void showDigit(const uint8_t digitMap[7], int displayPins[7]) {
+  for (int i = 0; i < 7; i++) segWrite(displayPins[i], digitMap[i]);
+}
+
+void showNumber(int number) {
+  if (number < 0 || number > 99) return; // Protección
+  int tens = number / 10;
+  int ones = number % 10;
+  showDigit(DIGITS[tens], D1);
+  showDigit(DIGITS[ones], D0);
+}
+
+void showError() {
+  // Muestra "EE" en los displays
+  const uint8_t E_SEG[] = {1,0,0,1,1,1,1};
+  showDigit(E_SEG, D1);
+  showDigit(E_SEG, D0);
+}
+
+
+void setup() {
+  Serial.begin(9600); // Iniciar comunicación serial
+  for (int i = 0; i < 7; i++) {
+    pinMode(D1[i], OUTPUT);
+    pinMode(D0[i], OUTPUT);
+  }
+  showNumber(0); // Mostrar 00 al iniciar
+}
+
+void loop() {
+  // 1. Revisa si hay comandos desde Python
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim(); // Limpiar espacios en blanco
+
+    if (command.equals("U")) { // 'U' para cuenta ascendente (Up)
+      counterDirection = 1;
+    } else if (command.equals("D")) { // 'D' para cuenta descendente (Down)
+      counterDirection = -1;
+    } else if (command.equals("S")) { // 'S' para parar (Stop)
+      counterDirection = 0;
+    } else if (command.equals("R")) { // 'R' para resetear
+      counterDirection = 0;
+      currentNumber = 0;
+    } else if (command.equals("EE")) { // 'EE' para error
+      counterDirection = 0;
+      showError(); // Muestra EE y se detiene ahí hasta nuevo comando
+      return; // Salta el resto del loop
+    } else { // Si no es un comando, es un número
+      int num = command.toInt();
+      counterDirection = 0; // Parar el contador al recibir un número
+      if (num >= 0 && num <= 99) {
+        currentNumber = num;
+      }
+    }
+  }
+
+  // 2. Maneja la lógica del contador si está activo
+  if (counterDirection != 0 && millis() - lastUpdateTime >= COUNTER_MS) {
+    lastUpdateTime = millis();
+    currentNumber += counterDirection;
+
+    // Lógica para que el contador sea cíclico (0 -> 99 -> 0)
+    if (currentNumber > 99) currentNumber = 0;
+    if (currentNumber < 0) currentNumber = 99;
+  }
+  
+  // 3. Actualiza el display en cada ciclo
+  showNumber(currentNumber);
+}
